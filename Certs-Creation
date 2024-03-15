@@ -1,0 +1,49 @@
+# Set the company name and calculate the expiration year
+$Company = "NAME" # Enter Company Name
+$ExpirationYear = (Get-Date).AddYears(3).Year.ToString()
+
+# Generate the names for the root and client certificates
+$RootCertName = "${Company}-AzureP2SRoot-$ExpirationYear"
+$ClientCertName = "${Company}-AzureP2SClient-$ExpirationYear"
+
+# Create a new self-signed root certificate
+$cert_root = New-SelfSignedCertificate -Type Custom -KeySpec Signature `
+-Subject $RootCertName -KeyExportPolicy Exportable `
+-HashAlgorithm sha256 -KeyLength 2048 -NotAfter (Get-Date).AddYears(3) -FriendlyName $RootCertName `
+-CertStoreLocation "Cert:\CurrentUser\My" -KeyUsageProperty Sign -KeyUsage CertSign
+
+# Create a new self-signed client certificate signed by the root certificate
+$cert_client = New-SelfSignedCertificate -Type Custom -KeySpec Signature `
+-Subject $ClientCertName -KeyExportPolicy Exportable `
+-HashAlgorithm sha256 -KeyLength 2048 -NotAfter (Get-Date).AddYears(3) -FriendlyName $ClientCertName `
+-CertStoreLocation "Cert:\CurrentUser\My" `
+-Signer $cert_root -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.2")
+
+# Export the root certificate without the private key to a file
+$rootCertPath = "C:\Export\${RootCertName}.cer"
+$rootCertDirectory = Split-Path -Path $rootCertPath -Parent
+if (-not (Test-Path $rootCertDirectory)) {
+    New-Item -Path $rootCertDirectory -ItemType Directory -Force
+}
+$cert_root | Export-Certificate -FilePath $rootCertPath
+
+# Export the client certificate with the private key in .PFX format to a file
+$clientCertPath = "C:\Export\${ClientCertName}.pfx"
+$clientCertDirectory = Split-Path -Path $clientCertPath -Parent
+if (-not (Test-Path $clientCertDirectory)) {
+    New-Item -Path $clientCertDirectory -ItemType Directory -Force
+}
+# Prompt the user to enter and verify a password for the client certificate
+do {
+    $password1 = Read-Host -Prompt "Enter password" -AsSecureString
+    $password2 = Read-Host -Prompt "Enter password again for verification" -AsSecureString
+    $password1Text = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($password1))
+    $password2Text = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($password2))
+    $passwordMatch = ($password1Text -eq $password2Text)
+    if (-not $passwordMatch) {
+        Write-Host "Passwords do not match. Please try again."
+    }
+} while (-not $passwordMatch)
+
+# Export the client certificate to a .PFX file with the provided password
+$cert_client | Export-PfxCertificate -FilePath $clientCertPath -Password $password1
